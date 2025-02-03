@@ -1274,7 +1274,7 @@ class BasicEntityPersister implements EntityPersister
      */
     protected function getSelectColumnsSQL()
     {
-        if ($this->currentPersisterContext->selectColumnListSql !== null && $this->filterHash === $this->em->getFilters()->getHash()) {
+        if ($this->currentPersisterContext->selectColumnListSql !== null /*&& $this->filterHash === $this->em->getFilters()->getHash()*/) {
             return $this->currentPersisterContext->selectColumnListSql;
         }
 
