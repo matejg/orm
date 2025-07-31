@@ -169,14 +169,6 @@ class BasicEntityPersister implements EntityPersister
     protected $quotedColumns = [];
 
     /**
-     * The INSERT SQL statement used for entities handled by this persister.
-     * This SQL is only generated once per request, if at all.
-     *
-     * @var string|null
-     */
-    private $insertSql;
-
-    /**
      * The quote strategy.
      *
      * @var QuoteStrategy
@@ -224,6 +216,16 @@ class BasicEntityPersister implements EntityPersister
             new Query\ResultSetMapping(),
             true
         );
+    }
+
+    final protected function isFilterHashUpToDate(): bool
+    {
+        return $this->filterHash === $this->em->getFilters()->getHash();
+    }
+
+    final protected function updateFilterHash(): void
+    {
+        $this->filterHash = $this->em->getFilters()->getHash();
     }
 
     /**
@@ -1274,7 +1276,7 @@ class BasicEntityPersister implements EntityPersister
      */
     protected function getSelectColumnsSQL()
     {
-        if ($this->currentPersisterContext->selectColumnListSql !== null /*&& $this->filterHash === $this->em->getFilters()->getHash()*/) {
+        if ($this->currentPersisterContext->selectColumnListSql !== null /*&& $this->isFilterHashUpToDate()*/) {
             return $this->currentPersisterContext->selectColumnListSql;
         }
 
@@ -1374,6 +1376,12 @@ class BasicEntityPersister implements EntityPersister
                     $joinCondition[] = $this->getSQLTableAlias($association['sourceEntity'], $assocAlias) . '.' . $sourceCol . ' = '
                         . $this->getSQLTableAlias($association['targetEntity']) . '.' . $targetCol;
                 }
+
+                // Add filter SQL
+                $filterSql = $this->generateFilterConditionSQL($eagerEntity, $joinTableAlias);
+                if ($filterSql) {
+                    $joinCondition[] = $filterSql;
+                }
             }
 
             $this->currentPersisterContext->selectJoinSql .= ' ' . $joinTableName . ' ' . $joinTableAlias . ' ON ';
@@ -1381,7 +1389,7 @@ class BasicEntityPersister implements EntityPersister
         }
 
         $this->currentPersisterContext->selectColumnListSql = implode(', ', $columnList);
-        $this->filterHash                                   = $this->em->getFilters()->getHash();
+        $this->updateFilterHash();
 
         return $this->currentPersisterContext->selectColumnListSql;
     }
@@ -1457,22 +1465,17 @@ class BasicEntityPersister implements EntityPersister
      */
     public function getInsertSQL()
     {
-        if ($this->insertSql !== null) {
-            return $this->insertSql;
-        }
-
         $columns   = $this->getInsertColumnList();
         $tableName = $this->quoteStrategy->getTableName($this->class, $this->platform);
 
-        if (empty($columns)) {
-            $identityColumn  = $this->quoteStrategy->getColumnName($this->class->identifier[0], $this->class, $this->platform);
-            $this->insertSql = $this->platform->getEmptyIdentityInsertSQL($tableName, $identityColumn);
+        if ($columns === []) {
+            $identityColumn = $this->quoteStrategy->getColumnName($this->class->identifier[0], $this->class, $this->platform);
 
-            return $this->insertSql;
+            return $this->platform->getEmptyIdentityInsertSQL($tableName, $identityColumn);
         }
 
-        $values  = [];
-        $columns = array_unique($columns);
+        $placeholders = [];
+        $columns      = array_unique($columns);
 
         foreach ($columns as $column) {
             $placeholder = '?';
@@ -1486,15 +1489,13 @@ class BasicEntityPersister implements EntityPersister
                 $placeholder = $type->convertToDatabaseValueSQL('?', $this->platform);
             }
 
-            $values[] = $placeholder;
+            $placeholders[] = $placeholder;
         }
 
-        $columns = implode(', ', $columns);
-        $values  = implode(', ', $values);
+        $columns      = implode(', ', $columns);
+        $placeholders = implode(', ', $placeholders);
 
-        $this->insertSql = sprintf('INSERT INTO %s (%s) VALUES (%s)', $tableName, $columns, $values);
-
-        return $this->insertSql;
+        return sprintf('INSERT INTO %s (%s) VALUES (%s)', $tableName, $columns, $placeholders);
     }
 
     /**
